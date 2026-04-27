@@ -26,6 +26,8 @@ public class UserController {
 
     @GetMapping("/users")
     public Collection<User> retrieveAllUsers() {
+        // Cambio visible para prueba de despliegue automático
+        System.out.println("¡Despliegue automático exitoso! Lista de usuarios consultada.");
         return service.getUsers();
     }
     @GetMapping("/users/{id}")

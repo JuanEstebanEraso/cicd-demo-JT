@@ -1,93 +1,54 @@
-#!/usr/bin/env groovy
-
 pipeline {
-    environment{
-       FEATURE_NAME = BRANCH_NAME.replaceAll('[\\(\\)_/]','-').toLowerCase()
-       REGISTRY_PASSWORD = credentials('REGISTRY_PASSWORD')
-       REGISTRY_USERNAME = credentials('REGISTRY_USERNAME')
-       POSTGRES_PASSWORD = credentials('POSTGRES_PASSWORD')
-       APP_NAME = "cicd-demo"
+    agent any
+    environment {
+        SONAR_PROJECT_KEY = 'mi-app'
+        SONAR_HOST_URL = 'http://sonarqube:9000'
+        SONAR_TOKEN = credentials('sonar-token') // Configura este secreto en Jenkins
+        TRIVY_SEVERITY = 'CRITICAL'
     }
-    agent any 
     stages {
-        stage('Docker Build & Push') {
+        stage('Checkout') {
             steps {
-                sh "make dockerLogin build dockerBuild dockerPush"
+                checkout scm
             }
-
         }
-		// not in parallel due to race condition with .env
-        stage('Docker Scan') {
+        stage('Build & Test') {
             steps {
-                sh "make dockerScan"
+                sh './mvnw clean package'
             }
-            post {
-                cleanup {
-                    sh "docker-compose down -v"
+        }
+        stage('Static Analysis (SonarQube)') {
+            steps {
+                withEnv(["SONAR_TOKEN=${SONAR_TOKEN}"]) {
+                    sh "./mvnw sonar:sonar -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}"
                 }
             }
         }
-        
-        stage('Parallel Tests') {
-            failFast true            
-            parallel {                  
-                stage('Static Code Analysis') {
-                    when {
-                        anyOf { branch 'master'; branch 'release'}
-                    }    
-                    steps {
-                        sh "make publishSonar"                        
-                    }
-                }
-                stage('Integration Tests') {
-                    steps {
-                        sh "make integrationTest"
-                    }
-                }
-            }
-        }
-        stage('Push Latest Tag') {
-            when { branch 'master' }
+        stage('Docker Build') {
             steps {
-                sh "make dockerPushLatest"
+                sh 'docker build -t mi-app:latest .'
             }
         }
-
-        stage('Deploy To dev') {
-            environment { 
-                ENV = "dev"
-                APP_DNS = util.selectAppUrl(ENV, FEATURE_NAME, APP_NAME)
-                KUBE_SERVER = credentials("KUBE_API_SERVER")
-                KUBE_TOKEN = credentials("KUBE_DEV_TOKEN")
-            }
+        stage('Container Security Scan (Trivy)') {
             steps {
-                sh "make kubeLogin deploy"
+                sh 'trivy image --exit-code 1 --severity ${TRIVY_SEVERITY} mi-app:latest'
             }
         }
-        
-        stage('Deploy To qa') {
-            when { expression { BRANCH_NAME ==~ /(master|release-[0-9]+$)/ }} // Only Master and Release branches 
-            environment { 
-                ENV = "qa"
-                APP_DNS = util.selectAppUrl(ENV, FEATURE_NAME, APP_NAME)
-                KUBE_SERVER = credentials("KUBE_API_SERVER")
-                KUBE_TOKEN = credentials("KUBE_QA_TOKEN")
-            }
+        stage('Deploy') {
+            when { branch 'main' }
             steps {
-                sh "make kubeLogin deploy"
+                sh 'docker rm -f mi-app-container || true'
+                sh 'docker run -d --name mi-app-container -p 80:8080 mi-app:latest'
             }
         }
-        
     }
     post {
         always {
-            script {
-                if(BRANCH_NAME ==~ /(master|release-[0-9]+$)/ ){
-                     util.notifySlack(currentBuild.result)
-                 }
-            }
-            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            junit 'target/surefire-reports/*.xml'
+            echo 'Limpiando entorno...'
+            cleanWs()
+        }
+        failure {
+            echo 'El pipeline ha fallado. Revisa los logs.'
         }
     }
 }
