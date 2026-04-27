@@ -14,13 +14,13 @@ pipeline {
         }
         stage('Build & Test') {
             steps {
-                sh './mvnw clean package'
+                sh 'mvn clean package'
             }
         }
         stage('Static Analysis (SonarQube)') {
             steps {
                 withEnv(["SONAR_TOKEN=${SONAR_TOKEN}"]) {
-                    sh "./mvnw sonar:sonar -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}"
+                    sh "mvn sonar:sonar -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN}"
                 }
             }
         }
