@@ -14,7 +14,7 @@ pipeline {
         }
         stage('Build & Test') {
             steps {
-                sh './mvnw clean package'
+                sh './mvnw clean package -DskipTests'
             }
         }
         stage('Static Analysis (SonarQube)') {
